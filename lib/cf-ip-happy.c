@@ -706,9 +706,25 @@ static CURLcode start_connect(struct Curl_cfilter *cf,
 
   CURL_TRC_CF(data, cf, "init ip ballers for transport %u", ctx->transport);
   ctx->started = *Curl_pgrs_now(data);
+
+#ifdef USE_IPV6
+  /* When DNS64 is enabled, IPv4 addresses are synthesized to IPv6.
+     Override IPv4-only mode to allow using the synthesized IPv6 addresses. */
+  {
+    int ip_version = cf->conn->ip_version;
+    if(data->set.dns64_enabled && ip_version == CURL_IPRESOLVE_V4) {
+      infof(data, "DNS64 enabled, allowing synthesized IPv6 addresses");
+      ip_version = CURL_IPRESOLVE_V6;  /* Use IPv6 addresses only (synthesized) */
+    }
+    return cf_ip_ballers_init(&ctx->ballers, ip_version,
+                              dns->addr, ctx->cf_create, ctx->transport,
+                              data->set.happy_eyeballs_timeout);
+  }
+#else
   return cf_ip_ballers_init(&ctx->ballers, cf->conn->ip_version,
                             dns->addr, ctx->cf_create, ctx->transport,
                             data->set.happy_eyeballs_timeout);
+#endif
 }
 
 static void cf_ip_happy_ctx_clear(struct Curl_cfilter *cf,

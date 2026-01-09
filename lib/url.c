@@ -1365,14 +1365,6 @@ static struct connectdata *allocate_conn(struct Curl_easy *data)
   conn->bits.ftp_use_eprt = data->set.ftp_use_eprt;
 #endif
   conn->ip_version = data->set.ipver;
-#ifdef USE_IPV6                                                               
-   /* When DNS64 is enabled, all IPv4 addresses are synthesized to IPv6.       
-      Override IPv4-only mode to allow using the synthesized IPv6 addresses.  */                                                                             
-  if(data->set.dns64_enabled && conn->ip_version == CURL_IPRESOLVE_V4) {      
-    infof(data, "DNS64 enabled, allowing IPv6 addresses");                    
-    conn->ip_version = CURL_IPRESOLVE_WHATEVER;                               
-  }                                                                           
-#endif    
   conn->connect_only = data->set.connect_only;
   conn->transport_wanted = TRNSPRT_TCP; /* most of them are TCP streams */
 
