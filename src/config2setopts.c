@@ -935,6 +935,9 @@ CURLcode config2setopts(struct OperationConfig *config,
   MY_SETOPT_STR(curl, CURLOPT_DNS_INTERFACE, config->dns_interface);
   MY_SETOPT_STR(curl, CURLOPT_DNS_LOCAL_IP4, config->dns_ipv4_addr);
   MY_SETOPT_STR(curl, CURLOPT_DNS_LOCAL_IP6, config->dns_ipv6_addr);
+#ifdef USE_IPV6
+  MY_SETOPT_STR(curl, CURLOPT_DNS64_PREFIX, config->dns64_prefix);
+#endif
   my_setopt_slist(curl, CURLOPT_TELNETOPTIONS, config->telnet_options);
   my_setopt_long(curl, CURLOPT_CONNECTTIMEOUT_MS, config->connecttimeout_ms);
   MY_SETOPT_STR(curl, CURLOPT_DOH_URL, config->doh_url);

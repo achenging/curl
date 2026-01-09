@@ -188,6 +188,16 @@ CURLcode Curl_dnscache_add(struct Curl_easy *data,
  */
 CURLcode Curl_loadhostpairs(struct Curl_easy *data);
 
+#ifdef USE_IPV6
+/*
+ * Parse a DNS64 prefix string in format "prefix/length".
+ * Examples: "64:ff9b::/96", "2001:db8::/32"
+ */
+CURLcode Curl_parse_dns64_prefix(const char *prefix_str,
+                                  struct in6_addr *prefix,
+                                  unsigned char *prefix_len);
+#endif
+
 #ifdef USE_CURL_ASYNC
 CURLcode Curl_resolv_check(struct Curl_easy *data,
                            struct Curl_dns_entry **dns);

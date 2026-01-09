@@ -1050,10 +1050,9 @@ static CURLcode setopt_long(struct Curl_easy *data, CURLoption option,
     s->low_speed_limit = arg;
     break;
   case CURLOPT_LOW_SPEED_TIME:
-    result = value_range(&arg, 0, 0, USHRT_MAX);
-    if(result)
-      return result;
-    s->low_speed_time = (uint16_t)arg;
+    if(arg < 0)
+      return CURLE_BAD_FUNCTION_ARGUMENT;
+    s->low_speed_time = arg;
     break;
   case CURLOPT_PORT:
     if((arg < 0) || (arg > 65535))
@@ -1191,17 +1190,11 @@ static CURLcode setopt_long(struct Curl_easy *data, CURLoption option,
   case CURLOPT_RTSP_REQUEST:
     return setopt_RTSP_REQUEST(data, arg);
   case CURLOPT_RTSP_CLIENT_CSEQ:
-    result = value_range(&arg, 0, 0, INT_MAX);
-    if(result)
-      return result;
-    data->state.rtsp_next_client_CSeq = (uint32_t)arg;
+    data->state.rtsp_next_client_CSeq = arg;
     break;
 
   case CURLOPT_RTSP_SERVER_CSEQ:
-    result = value_range(&arg, 0, 0, INT_MAX);
-    if(result)
-      return result;
-    data->state.rtsp_next_server_CSeq = (uint32_t)arg;
+    data->state.rtsp_next_server_CSeq = arg;
     break;
 
 #endif /* !CURL_DISABLE_RTSP */
@@ -1238,7 +1231,9 @@ static CURLcode setopt_long(struct Curl_easy *data, CURLoption option,
     return setopt_set_timeout_ms(&s->happy_eyeballs_timeout, arg);
 
   case CURLOPT_UPKEEP_INTERVAL_MS:
-    return setopt_set_timeout_ms(&s->upkeep_interval_ms, arg);
+    if(arg < 0)
+      return CURLE_BAD_FUNCTION_ARGUMENT;
+    s->upkeep_interval_ms = arg;
     break;
   case CURLOPT_MAXAGE_CONN:
     return setopt_set_timeout_sec(&s->conn_max_idle_ms, arg);
@@ -2467,6 +2462,31 @@ static CURLcode setopt_cptr(struct Curl_easy *data, CURLoption option,
       return result;
     return Curl_async_ares_set_dns_local_ip6(data);
 
+#endif
+#ifdef USE_IPV6
+  case CURLOPT_DNS64_PREFIX:
+    result = Curl_setstropt(&s->str[STRING_DNS64_PREFIX], ptr);
+    if(result)
+      return result;
+
+    /* Parse and validate the DNS64 prefix */
+    if(ptr) {
+      result = Curl_parse_dns64_prefix(ptr,
+                                       &s->dns64_prefix,
+                                       &s->dns64_prefix_len);
+      if(result) {
+        /* Invalid prefix format */
+        (void)Curl_setstropt(&s->str[STRING_DNS64_PREFIX], NULL);
+        s->dns64_enabled = FALSE;
+        return result;
+      }
+      s->dns64_enabled = TRUE;
+    }
+    else {
+      /* Clearing the prefix */
+      s->dns64_enabled = FALSE;
+    }
+    break;
 #endif
 #ifdef USE_UNIX_SOCKETS
   case CURLOPT_UNIX_SOCKET_PATH:

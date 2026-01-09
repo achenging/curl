@@ -123,6 +123,7 @@ static const struct LongShort aliases[]= {
   {"dns-ipv4-addr",              ARG_STRG, ' ', C_DNS_IPV4_ADDR},
   {"dns-ipv6-addr",              ARG_STRG, ' ', C_DNS_IPV6_ADDR},
   {"dns-servers",                ARG_STRG, ' ', C_DNS_SERVERS},
+  {"dns64-prefix",               ARG_STRG, ' ', C_DNS64_PREFIX},
   {"doh-cert-status",            ARG_BOOL|ARG_TLS, ' ', C_DOH_CERT_STATUS},
   {"doh-insecure",               ARG_BOOL|ARG_TLS, ' ', C_DOH_INSECURE},
   {"doh-url"        ,            ARG_STRG, ' ', C_DOH_URL},
@@ -2320,6 +2321,9 @@ static ParameterError opt_string(struct OperationConfig *config,
     nextarg = "";
 
   switch(a->cmd) {
+  case C_DNS64_PREFIX: /* --dns64-prefix */
+    return getstr(&config->dns64_prefix, nextarg, DENY_BLANK);
+
   case C_DNS_IPV4_ADDR: /* --dns-ipv4-addr */
     if(!curlinfo->ares_num) /* c-ares is needed for this */
       return PARAM_LIBCURL_DOESNT_SUPPORT;

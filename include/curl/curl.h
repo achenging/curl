@@ -1927,6 +1927,12 @@ typedef enum {
    * Only supported by the c-ares DNS backend */
   CURLOPT(CURLOPT_DNS_LOCAL_IP6, CURLOPTTYPE_STRINGPOINT, 223),
 
+  /* Set the DNS64 prefix for IPv4-to-IPv6 address synthesis.
+   * The string should be in the format "prefix/length", e.g., "64:ff9b::/96"
+   * as defined in RFC 6052. When set, resolved IPv4 addresses will be
+   * synthesized into IPv6 addresses using the specified prefix. */
+  CURLOPT(CURLOPT_DNS64_PREFIX, CURLOPTTYPE_STRINGPOINT, 329),
+
   /* Set authentication options directly */
   CURLOPT(CURLOPT_LOGIN_OPTIONS, CURLOPTTYPE_STRINGPOINT, 224),
 

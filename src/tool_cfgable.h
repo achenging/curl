@@ -82,6 +82,7 @@ struct OperationConfig {
   char *dns_interface; /* interface name */
   char *dns_ipv4_addr; /* dot notation */
   char *dns_ipv6_addr; /* dot notation */
+  char *dns64_prefix;  /* DNS64 prefix for IPv4-to-IPv6 synthesis */
   char *userpwd;
   char *login_options;
   char *tls_username;

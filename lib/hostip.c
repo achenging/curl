@@ -485,6 +485,234 @@ UNITTEST CURLcode Curl_shuffle_addr(struct Curl_easy *data,
 }
 #endif
 
+#ifdef USE_IPV6
+/*
+ * Parse a DNS64 prefix string in format "prefix/length".
+ * Examples: "64:ff9b::/96", "2001:db8::/32"
+ */
+CURLcode Curl_parse_dns64_prefix(const char *prefix_str,
+                                  struct in6_addr *prefix,
+                                  unsigned char *prefix_len)
+{
+  char *slash;
+  char prefix_copy[128];
+  unsigned long len;
+
+  if(!prefix_str || !prefix || !prefix_len)
+    return CURLE_BAD_FUNCTION_ARGUMENT;
+
+  /* Find the slash separator */
+  slash = strchr(prefix_str, '/');
+  if(!slash) {
+    /* No prefix length specified */
+    return CURLE_BAD_FUNCTION_ARGUMENT;
+  }
+
+  /* Extract prefix part */
+  size_t prefix_part_len = (size_t)(slash - prefix_str);
+  if(prefix_part_len >= sizeof(prefix_copy))
+    return CURLE_BAD_FUNCTION_ARGUMENT;
+
+  memcpy(prefix_copy, prefix_str, prefix_part_len);
+  prefix_copy[prefix_part_len] = '\0';
+
+  /* Parse the IPv6 prefix */
+  if(curlx_inet_pton(AF_INET6, prefix_copy, prefix) != 1) {
+    return CURLE_BAD_FUNCTION_ARGUMENT;
+  }
+
+  /* Parse the prefix length */
+  len = strtoul(slash + 1, NULL, 10);
+  if(len == 0 || len > 128) {
+    return CURLE_BAD_FUNCTION_ARGUMENT;
+  }
+
+  /* Validate prefix length (RFC 6052 recommends specific lengths) */
+  if(len != 32 && len != 40 && len != 48 && len != 56 &&
+     len != 64 && len != 96) {
+    /* Non-standard prefix length - allow but could log warning */
+  }
+
+  *prefix_len = (unsigned char)len;
+  return CURLE_OK;
+}
+
+/*
+ * Convert an IPv4 Curl_addrinfo to IPv6 using DNS64 synthesis.
+ * Creates a new Curl_addrinfo with the synthesized IPv6 address.
+ */
+static struct Curl_addrinfo *
+dns64_synthesize_ipv6(const struct Curl_addrinfo *ipv4_addr,
+                      const struct in6_addr *prefix,
+                      unsigned char prefix_len)
+{
+  struct Curl_addrinfo *ipv6_addr;
+  struct sockaddr_in6 *sa6;
+  const struct sockaddr_in *sa4;
+  struct in6_addr synthesized;
+  size_t addr_size = sizeof(struct sockaddr_in6);
+
+  /* Validate input */
+  if(!ipv4_addr || ipv4_addr->ai_family != AF_INET || !prefix)
+    return NULL;
+
+  /* Only support standard DNS64 prefix lengths (RFC 6052) */
+  if(prefix_len != 32 && prefix_len != 40 && prefix_len != 48 &&
+     prefix_len != 56 && prefix_len != 64 && prefix_len != 96) {
+    return NULL;
+  }
+
+  /* Allocate new addrinfo structure with space for sockaddr_in6 */
+  ipv6_addr = calloc(1, sizeof(struct Curl_addrinfo) + addr_size);
+  if(!ipv6_addr)
+    return NULL;
+
+  /* Copy the prefix into synthesized address */
+  memcpy(&synthesized, prefix, sizeof(struct in6_addr));
+
+  /* Get the IPv4 address */
+  sa4 = (const struct sockaddr_in *)ipv4_addr->ai_addr;
+  uint32_t ipv4 = ntohl(sa4->sin_addr.s_addr);
+
+  /* Embed IPv4 address according to RFC 6052 */
+  /* For /96 prefix: IPv4 goes in the last 32 bits */
+  if(prefix_len == 96) {
+    synthesized.s6_addr[12] = (unsigned char)((ipv4 >> 24) & 0xFF);
+    synthesized.s6_addr[13] = (unsigned char)((ipv4 >> 16) & 0xFF);
+    synthesized.s6_addr[14] = (unsigned char)((ipv4 >> 8) & 0xFF);
+    synthesized.s6_addr[15] = (unsigned char)(ipv4 & 0xFF);
+  }
+  /* For /64: split IPv4 across bytes 8-11 (skip byte 8 for u bit) */
+  else if(prefix_len == 64) {
+    synthesized.s6_addr[9] = (unsigned char)((ipv4 >> 24) & 0xFF);
+    synthesized.s6_addr[10] = (unsigned char)((ipv4 >> 16) & 0xFF);
+    synthesized.s6_addr[11] = (unsigned char)((ipv4 >> 8) & 0xFF);
+    synthesized.s6_addr[12] = (unsigned char)(ipv4 & 0xFF);
+  }
+  /* For other prefix lengths, use simplified embedding */
+  else {
+    unsigned char byte_offset = prefix_len / 8;
+    /* Place IPv4 starting at the byte after the prefix */
+    if(byte_offset + 4 <= 16) {
+      synthesized.s6_addr[byte_offset] = (unsigned char)((ipv4 >> 24) & 0xFF);
+      synthesized.s6_addr[byte_offset + 1] =
+        (unsigned char)((ipv4 >> 16) & 0xFF);
+      synthesized.s6_addr[byte_offset + 2] =
+        (unsigned char)((ipv4 >> 8) & 0xFF);
+      synthesized.s6_addr[byte_offset + 3] = (unsigned char)(ipv4 & 0xFF);
+    }
+  }
+
+  /* Setup the sockaddr_in6 structure */
+  sa6 = (struct sockaddr_in6 *)((char *)ipv6_addr +
+                                sizeof(struct Curl_addrinfo));
+  sa6->sin6_family = AF_INET6;
+  sa6->sin6_port = sa4->sin_port;  /* Preserve port */
+  sa6->sin6_flowinfo = 0;
+  memcpy(&sa6->sin6_addr, &synthesized, sizeof(struct in6_addr));
+#ifdef HAVE_SOCKADDR_IN6_SIN6_SCOPE_ID
+  sa6->sin6_scope_id = 0;
+#endif
+
+  /* Fill in the addrinfo structure */
+  ipv6_addr->ai_flags = ipv4_addr->ai_flags;
+  ipv6_addr->ai_family = AF_INET6;
+  ipv6_addr->ai_socktype = ipv4_addr->ai_socktype;
+  ipv6_addr->ai_protocol = ipv4_addr->ai_protocol;
+  ipv6_addr->ai_addrlen = (curl_socklen_t)addr_size;
+  ipv6_addr->ai_addr = (struct sockaddr *)sa6;
+  ipv6_addr->ai_canonname = NULL;
+  ipv6_addr->ai_next = NULL;
+
+  return ipv6_addr;
+}
+
+/*
+ * Apply DNS64 synthesis to a list of addrinfo structures.
+ * Converts all IPv4 addresses to IPv6, frees IPv4 entries.
+ */
+static CURLcode
+apply_dns64_synthesis(struct Curl_addrinfo **addr, struct Curl_easy *data)
+{
+  struct Curl_addrinfo *current, *prev = NULL;
+  struct Curl_addrinfo *ipv6_list = NULL, *last_ipv6 = NULL;
+
+  if(!data->set.dns64_enabled || !addr || !*addr)
+    return CURLE_OK;
+
+  current = *addr;
+
+  while(current) {
+    struct Curl_addrinfo *next = current->ai_next;
+
+    if(current->ai_family == AF_INET) {
+      /* Synthesize IPv6 from IPv4 */
+      struct Curl_addrinfo *synthesized =
+        dns64_synthesize_ipv6(current, &data->set.dns64_prefix,
+                              data->set.dns64_prefix_len);
+
+      if(synthesized) {
+        /* Add to IPv6 list */
+        if(!ipv6_list) {
+          ipv6_list = synthesized;
+          last_ipv6 = synthesized;
+        }
+        else {
+          last_ipv6->ai_next = synthesized;
+          last_ipv6 = synthesized;
+        }
+
+        /* Remove IPv4 entry from original list */
+        if(prev)
+          prev->ai_next = next;
+        else
+          *addr = next;
+
+        /* Free the IPv4 entry */
+        free(current);
+        current = next;
+        continue;
+      }
+      /* If synthesis failed, keep the IPv4 address */
+    }
+    else if(current->ai_family == AF_INET6) {
+      /* Keep existing IPv6 addresses */
+      /* Move to IPv6 list */
+      if(prev)
+        prev->ai_next = next;
+      else
+        *addr = next;
+
+      if(!ipv6_list) {
+        ipv6_list = current;
+        last_ipv6 = current;
+      }
+      else {
+        last_ipv6->ai_next = current;
+        last_ipv6 = current;
+      }
+      current->ai_next = NULL;
+      current = next;
+      continue;
+    }
+
+    prev = current;
+    current = next;
+  }
+
+  /* Replace original list with IPv6 list */
+  if(ipv6_list) {
+    /* Append any remaining addresses */
+    if(*addr) {
+      last_ipv6->ai_next = *addr;
+    }
+    *addr = ipv6_list;
+  }
+
+  return CURLE_OK;
+}
+#endif /* USE_IPV6 */
+
 struct Curl_dns_entry *
 Curl_dnscache_mk_entry(struct Curl_easy *data,
                        struct Curl_addrinfo *addr,
@@ -505,6 +733,21 @@ Curl_dnscache_mk_entry(struct Curl_easy *data,
 #else
   (void)data;
 #endif
+
+#ifdef USE_IPV6
+  /* Apply DNS64 synthesis if enabled */
+  if(data->set.dns64_enabled) {
+    CURLcode result = apply_dns64_synthesis(&addr, data);
+    if(result) {
+      Curl_freeaddrinfo(addr);
+      return NULL;
+    }
+    if(addr && addr->ai_family == AF_INET6) {
+      infof(data, "DNS64: Synthesized IPv6 addresses from IPv4");
+    }
+  }
+#endif
+
   if(!hostlen)
     hostlen = strlen(hostname);
 
